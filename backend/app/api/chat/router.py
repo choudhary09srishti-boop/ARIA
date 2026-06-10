@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from groq import Groq
 from app.config.settings import settings
+from app.middleware.auth_middleware import get_current_user
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -9,13 +10,12 @@ client = Groq(api_key=settings.GROQ_API_KEY)
 
 class ChatRequest(BaseModel):
     message: str
-    user_id: str
 
 class ChatResponse(BaseModel):
     response: str
 
 @router.post("/", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, current_user=Depends(get_current_user)):
     try:
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
