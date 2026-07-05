@@ -1,22 +1,50 @@
-from fastapi import APIRouter, Depends
-from middleware.auth_middleware import get_current_user
-from services.ai.ai_router import get_ai_response
-from services.memory.memory_service import save_conversation
-from services.embeddings.embeddings_service import store_embedding
-import re
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from app.services.ai.ai_router import get_ai_response
+from app.services.memory.memory_service import MemoryService
+from app.services.personality.personality_service import PersonalityService
+from app.services.embeddings.embeddings_service import EmbeddingsService
+from app.middleware.auth_middleware import get_current_user
+from app.database.db import get_db
+import uuid
 
-router = APIRouter()
+router = APIRouter(prefix="/voice", tags=["voice"])
 
-def clean_for_speech(text: str) -> str:
-    text = re.sub(r'[*_#`]', '', text)
-    text = re.sub(r'\n+', ' ', text)
-    return text.strip()
+class VoiceRequest(BaseModel):
+    transcript: str
 
-@router.post("/speak")
-async def voice_chat(payload: dict, user=Depends(get_current_user)):
-    user_text = payload.get("text", "")
-    ai_reply = await get_ai_response(user_text, user_id=user.id)
-    clean_reply = clean_for_speech(ai_reply)
-    save_conversation(user.id, user_text, ai_reply)
-    store_embedding(user.id, user_text, ai_reply)
-    return {"reply": clean_reply}
+class VoiceResponse(BaseModel):
+    response: str
+
+@router.post("/", response_model=VoiceResponse)
+async def voice_chat(request: VoiceRequest, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        memory_service = MemoryService(db, current_user.id)
+        personality_service = PersonalityService(db, current_user.id)
+        embeddings_service = EmbeddingsService(current_user.id)
+
+        history = memory_service.get_recent_history(limit=10)
+        relevant_context = embeddings_service.search(request.transcript, n_results=3)
+        system_prompt = personality_service.get_system_prompt()
+
+        if relevant_context:
+            context_text = "\n".join(relevant_context)
+            system_prompt += f"\n\nRelevant past context:\n{context_text}"
+
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": request.transcript})
+
+        response = get_ai_response(messages)
+
+        memory_service.save_interaction(request.transcript, response)
+        embeddings_service.store(
+            text=f"User: {request.transcript}\nARIA: {response}",
+            doc_id=str(uuid.uuid4()),
+            metadata={"user_id": current_user.id}
+        )
+
+        return {"response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

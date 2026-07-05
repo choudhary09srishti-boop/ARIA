@@ -5,6 +5,7 @@ from app.api.auth.router import router as auth_router
 from app.api.todo.router import router as todo_router
 from app.api.chat.router import router as chat_router
 from app.api.memory.router import router as memory_router
+from app.api.voice.router import router as voice_router
 
 load_dotenv()
 
@@ -26,6 +27,7 @@ app.include_router(auth_router)
 app.include_router(todo_router)
 app.include_router(chat_router)
 app.include_router(memory_router)
+app.include_router(voice_router)
 
 @app.get("/")
 def root():
