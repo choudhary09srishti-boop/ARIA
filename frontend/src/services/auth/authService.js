@@ -14,7 +14,6 @@ export const authService = {
     const response = await client.post('/auth/login', {
       email,
       password,
-      full_name: '',
     });
     const { access_token } = response.data;
     localStorage.setItem('aria_token', access_token);
